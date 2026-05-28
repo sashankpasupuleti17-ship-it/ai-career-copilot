@@ -2,7 +2,9 @@ streamlit
 groq
 python-dotenv
 PyMuPDF
-chromadb
-sentence-transformers
-langchain
 requests
+sentence-transformers
+chromadb==0.4.24
+protobuf==3.20.3
+opentelemetry-proto==1.24.0
+playwright
