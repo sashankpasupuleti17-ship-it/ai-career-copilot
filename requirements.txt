@@ -1,4 +1,8 @@
 streamlit
-openai
+groq
 python-dotenv
 PyMuPDF
+chromadb
+sentence-transformers
+langchain
+requests

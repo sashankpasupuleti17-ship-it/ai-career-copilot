@@ -1,7 +1,26 @@
 import streamlit as st
 from datetime import datetime
+
+from utils.email_notifier import send_job_notification
+from utils.job_tracker import search_it_jobs
 from utils.resume_parser import extract_text_from_pdf
-from utils.llm_analyzer import analyze_resume
+from utils.autofill_agent import open_application_page
+
+from utils.llm_analyzer import (
+    analyze_resume,
+    answer_with_context
+)
+
+from utils.application_assistant import (
+    save_user_profile,
+    load_user_profile,
+    generate_application_packet
+)
+
+from utils.rag_engine import (
+    create_vector_store,
+    retrieve_relevant_chunks
+)
 
 st.set_page_config(
     page_title="AI Career Copilot",
@@ -9,11 +28,12 @@ st.set_page_config(
     layout="wide"
 )
 
-# Store analysis history
 if "analysis_history" not in st.session_state:
     st.session_state.analysis_history = []
 
-# Custom CSS
+if "latest_jobs" not in st.session_state:
+    st.session_state.latest_jobs = []
+
 st.markdown("""
 <style>
 .main-title {
@@ -58,27 +78,21 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Sidebar inputs
 with st.sidebar:
     st.markdown(
         '<div class="sidebar-title">🤖 AI Career Copilot</div>',
         unsafe_allow_html=True
     )
 
-    st.caption(
-        "Upload resume + job description anytime from here."
-    )
-
+    st.caption("Upload resume + job description anytime from here.")
     st.divider()
 
-    # FIXED: Added unique key
     resume_file = st.file_uploader(
         "📄 Upload Resume PDF",
         type=["pdf"],
         key="resume_pdf_uploader"
     )
 
-    # Added keys for stability
     job_title = st.text_input(
         "🏢 Job Title / Company",
         placeholder="Example: AI Engineer Intern - Google",
@@ -109,33 +123,29 @@ with st.sidebar:
         st.success("History cleared.")
 
     st.divider()
+    st.info("Phase 4: RAG + Jobs + Application Autofill")
 
-    st.info("Phase 1 MVP: Resume analysis using LLM.")
-
-# Main page
 st.markdown(
     '<div class="main-title">AI Career Copilot</div>',
     unsafe_allow_html=True
 )
 
 st.markdown(
-    '''
+    """
     <div class="sub-title">
-    Analyze resumes, compare job descriptions,
-    and track previous job analysis history.
+    Analyze resumes, chat with your career assistant, track jobs, and prepare applications.
     </div>
-    ''',
+    """,
     unsafe_allow_html=True
 )
 
-# Metric cards
 col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown("""
     <div class="metric-card">
         <div class="card-title">Current Phase</div>
-        <div class="card-value">Phase 1</div>
+        <div class="card-value">Phase 4</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -143,41 +153,41 @@ with col2:
     st.markdown(f"""
     <div class="metric-card">
         <div class="card-title">Total Analyses</div>
-        <div class="card-value">
-            {len(st.session_state.analysis_history)}
-        </div>
+        <div class="card-value">{len(st.session_state.analysis_history)}</div>
     </div>
     """, unsafe_allow_html=True)
 
 with col3:
     st.markdown("""
     <div class="metric-card">
-        <div class="card-title">Next Upgrade</div>
-        <div class="card-value">RAG</div>
+        <div class="card-title">AI System</div>
+        <div class="card-value">RAG + Jobs</div>
     </div>
     """, unsafe_allow_html=True)
 
 st.write("")
 
-# Analyze resume
 if analyze_button:
-
     if resume_file is None:
-        st.error(
-            "Please upload your resume PDF from the sidebar."
-        )
+        st.error("Please upload your resume PDF.")
 
     elif not job_description.strip():
-        st.error(
-            "Please paste the job description in the sidebar."
-        )
+        st.error("Please paste a job description.")
 
     else:
         with st.spinner("Analyzing resume with AI..."):
+            resume_text = extract_text_from_pdf(resume_file)
 
-            resume_text = extract_text_from_pdf(
-                resume_file
-            )
+            combined_text = f"""
+Resume:
+{resume_text}
+
+Job Description:
+{job_description}
+"""
+
+            collection = create_vector_store(combined_text)
+            st.session_state.rag_collection = collection
 
             result = analyze_resume(
                 resume_text,
@@ -186,80 +196,140 @@ if analyze_button:
 
         history_item = {
             "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "job_title": (
-                job_title
-                if job_title
-                else "Untitled Job"
-            ),
+            "job_title": job_title if job_title else "Untitled Job",
             "result": result,
             "resume_text": resume_text,
             "job_description": job_description
         }
 
-        st.session_state.analysis_history.insert(
-            0,
-            history_item
-        )
+        st.session_state.analysis_history.insert(0, history_item)
+        st.success("Analysis completed successfully!")
 
-        st.success(
-            "Analysis completed and saved to history!"
-        )
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "🔎 Live IT Jobs",
+    "📊 Latest Analysis",
+    "💬 Ask Career Copilot",
+    "📚 Previous Job History",
+    "📄 Resume Text",
+    "💼 Job Description",
+    "📝 Application Autofill"
+])
 
-# Display results/history
-if st.session_state.analysis_history:
+with tab1:
+    st.subheader("Live USA IT Job Tracker")
 
-    latest = st.session_state.analysis_history[0]
+    job_keyword = st.text_input(
+        "Search Role",
+        value="AI Engineer Intern",
+        key="job_search_keyword"
+    )
 
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📊 Latest Analysis",
-        "📚 Previous Job History",
-        "📄 Resume Text",
-        "💼 Job Description"
-    ])
+    job_location = st.text_input(
+        "Location",
+        value="United States",
+        key="job_search_location"
+    )
 
-    # Latest analysis
-    with tab1:
+    if st.button("Find Jobs", key="find_jobs_button"):
+        with st.spinner("Searching live IT jobs..."):
+            jobs = search_it_jobs(
+                keyword=job_keyword,
+                location=job_location,
+                results_per_page=10
+            )
+
+        if isinstance(jobs, dict) and "error" in jobs:
+            st.error(jobs["error"])
+
+        elif not jobs:
+            st.warning("No jobs found. Try another keyword or location.")
+
+        else:
+            st.session_state.latest_jobs = jobs
+            st.success(f"Found {len(jobs)} jobs.")
+
+    if st.session_state.latest_jobs:
+        if st.button("Send These Jobs to My Email", key="email_jobs_button"):
+            email_status = send_job_notification(st.session_state.latest_jobs)
+            st.info(email_status)
+
+        for index, job in enumerate(st.session_state.latest_jobs, start=1):
+            with st.container():
+                st.markdown(f"### {index}. {job['title']}")
+                st.write(f"**Company:** {job['company']}")
+                st.write(f"**Location:** {job['location']}")
+                st.write(f"**Posted Date:** {job['created']}")
+
+                if job.get("is_recent"):
+                    st.success("🔥 Posted within last 48 hours")
+
+                with st.expander("Job Description"):
+                    st.write(job["description"])
+
+                st.link_button(
+                    "Apply Now",
+                    job["apply_link"]
+                )
+
+                st.divider()
+
+with tab2:
+    if st.session_state.analysis_history:
+        latest = st.session_state.analysis_history[0]
 
         st.markdown(f"### {latest['job_title']}")
-
-        st.caption(
-            f"Analyzed on {latest['time']}"
-        )
-
-        st.markdown(
-            '<div class="analysis-box">',
-            unsafe_allow_html=True
-        )
-
+        st.caption(f"Analyzed on {latest['time']}")
+        st.markdown('<div class="analysis-box">', unsafe_allow_html=True)
         st.markdown(latest["result"])
+        st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.info("Upload resume + job description from sidebar to see latest analysis.")
 
-        st.markdown(
-            '</div>',
-            unsafe_allow_html=True
-        )
+with tab3:
+    st.subheader("Ask questions about your resume and job description")
 
-    # History
-    with tab2:
+    question = st.text_input(
+        "Ask a question",
+        placeholder="Example: What skills am I missing?",
+        key="rag_question"
+    )
 
-        st.subheader(
-            "Previous Job Analysis History"
-        )
+    if st.button("Ask AI", key="ask_rag_button"):
+        if "rag_collection" not in st.session_state:
+            st.error("Please analyze a resume first.")
 
-        for index, item in enumerate(
-            st.session_state.analysis_history
-        ):
+        elif not question.strip():
+            st.error("Please enter a question.")
 
+        else:
+            with st.spinner("Retrieving relevant context..."):
+                context = retrieve_relevant_chunks(
+                    st.session_state.rag_collection,
+                    question
+                )
+
+                answer = answer_with_context(
+                    question,
+                    context
+                )
+
+            st.markdown("### Answer")
+            st.markdown(answer)
+
+            with st.expander("Retrieved Context"):
+                st.write(context)
+
+with tab4:
+    st.subheader("Previous Job Analysis History")
+
+    if st.session_state.analysis_history:
+        for index, item in enumerate(st.session_state.analysis_history):
             with st.expander(
-                f"{index + 1}. "
-                f"{item['job_title']} — "
-                f"{item['time']}"
+                f"{index + 1}. {item['job_title']} — {item['time']}"
             ):
-
                 st.markdown(item["result"])
 
-                st.markdown(
-                    "#### Job Description"
-                )
+                st.markdown("#### Job Description")
 
                 st.text_area(
                     "Saved Job Description",
@@ -267,9 +337,12 @@ if st.session_state.analysis_history:
                     height=180,
                     key=f"jd_{index}"
                 )
+    else:
+        st.info("No resume analysis history yet.")
 
-    # Resume text
-    with tab3:
+with tab5:
+    if st.session_state.analysis_history:
+        latest = st.session_state.analysis_history[0]
 
         st.text_area(
             "Extracted Resume Text",
@@ -277,9 +350,12 @@ if st.session_state.analysis_history:
             height=500,
             key="resume_text_display"
         )
+    else:
+        st.info("Upload and analyze a resume first.")
 
-    # Job description
-    with tab4:
+with tab6:
+    if st.session_state.analysis_history:
+        latest = st.session_state.analysis_history[0]
 
         st.text_area(
             "Latest Job Description Used",
@@ -287,30 +363,121 @@ if st.session_state.analysis_history:
             height=500,
             key="latest_jd_display"
         )
+    else:
+        st.info("Paste and analyze a job description first.")
 
-# Empty state
-else:
+with tab7:
+    st.subheader("Application Autofill Assistant")
 
-    st.markdown("""
-    <div class="analysis-box">
-        <h3>Welcome 👋</h3>
+    saved_profile = load_user_profile()
 
-        <p>
-        Use the sidebar to upload your resume
-        and paste a job description.
-        </p>
+    st.markdown("### Save Your Common Application Details")
 
-        <p>
-        Your previous job analyses will appear
-        here after each run.
-        </p>
+    full_name = st.text_input(
+        "Full Name",
+        value=saved_profile.get("full_name", ""),
+        key="profile_full_name"
+    )
 
-        <ul>
-            <li>ATS match score</li>
-            <li>Matched skills</li>
-            <li>Missing skills</li>
-            <li>Resume weaknesses</li>
-            <li>Career suggestions</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
+    email = st.text_input(
+        "Email",
+        value=saved_profile.get("email", ""),
+        key="profile_email"
+    )
+
+    phone = st.text_input(
+        "Phone",
+        value=saved_profile.get("phone", ""),
+        key="profile_phone"
+    )
+
+    linkedin = st.text_input(
+        "LinkedIn",
+        value=saved_profile.get("linkedin", ""),
+        key="profile_linkedin"
+    )
+
+    github = st.text_input(
+        "GitHub",
+        value=saved_profile.get("github", ""),
+        key="profile_github"
+    )
+
+    education = st.text_input(
+        "Education",
+        value=saved_profile.get("education", ""),
+        key="profile_education"
+    )
+
+    work_authorization = st.text_area(
+        "Work Authorization / Sponsorship Answer",
+        value=saved_profile.get("work_authorization", ""),
+        height=100,
+        key="profile_work_auth"
+    )
+
+    common_answer = st.text_area(
+        "Common Application Answer",
+        value=saved_profile.get("common_answer", ""),
+        height=120,
+        key="profile_common_answer"
+    )
+
+    if st.button("Save Profile", key="save_profile_button"):
+        profile_data = {
+            "full_name": full_name,
+            "email": email,
+            "phone": phone,
+            "linkedin": linkedin,
+            "github": github,
+            "education": education,
+            "work_authorization": work_authorization,
+            "common_answer": common_answer
+        }
+
+        status = save_user_profile(profile_data)
+        st.success(status)
+
+    st.divider()
+
+    st.markdown("### Generate Application Packet")
+
+    if st.session_state.latest_jobs:
+        selected_job_index = st.selectbox(
+            "Select Job",
+            range(len(st.session_state.latest_jobs)),
+            format_func=lambda i: (
+                f"{st.session_state.latest_jobs[i]['title']} - "
+                f"{st.session_state.latest_jobs[i]['company']}"
+            ),
+            key="selected_application_job"
+        )
+
+        selected_job = st.session_state.latest_jobs[selected_job_index]
+
+        if st.button("Generate Application Packet", key="generate_packet_button"):
+            profile = load_user_profile()
+
+            packet = generate_application_packet(
+                profile,
+                selected_job
+            )
+
+            st.text_area(
+                "Application Packet",
+                packet,
+                height=500,
+                key="application_packet_output"
+            )
+
+            st.link_button(
+                "Open Apply Link",
+                selected_job["apply_link"]
+            )
+
+        if st.button("Open with Autofill Assistant", key="open_autofill_button"):
+            status = open_application_page(selected_job["apply_link"])
+            st.info(status)
+
+    else:
+        st.info("Search jobs first in the Live IT Jobs tab.")

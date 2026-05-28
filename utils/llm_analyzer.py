@@ -51,3 +51,38 @@ Job Description:
 
     except Exception as e:
         return f"Error: {e}"
+    
+def answer_with_context(question, context):
+    try:
+        prompt = f"""
+You are an AI Career Copilot.
+
+Answer the user's question using ONLY the provided context.
+If the answer is not present in the context, say that the available resume/job data does not contain enough information.
+
+Context:
+{context}
+
+Question:
+{question}
+"""
+
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful AI career assistant using retrieved context."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.2
+        )
+
+        return completion.choices[0].message.content
+
+    except Exception as e:
+        return f"Error: {e}"
